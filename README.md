@@ -21,6 +21,9 @@ A FoundryVTT module that solves one of the most annoying issues in Foundry: rota
 2.  Restart Foundry VTT.
 3.  Enable the module in **Manage Modules**.
 
+Alternatively:
+Enter the Manifest URL `https://github.com/GeanoFee/geanos-scene-rotation/releases/latest/download/module.json` within Foundry's "Install Module" window.
+
 ## Usage
 
 1.  Open the **Configuration** window for any Scene.
