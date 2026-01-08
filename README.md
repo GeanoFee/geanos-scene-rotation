@@ -1,5 +1,7 @@
 # Geano's Scene Rotation
 
+![Geano's Scene Rotation Showcase](https://github.com/GeanoFee/geanos-scene-rotation/blob/main/GSR.jpg?raw=true)
+
 A FoundryVTT module that solves one of the most annoying issues in Foundry: rotating a scene 90 degrees after you've already set it up.
 
 ## Features
