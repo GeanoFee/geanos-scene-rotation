@@ -27,7 +27,7 @@ Enter the Manifest URL `https://github.com/GeanoFee/geanos-scene-rotation/releas
 ## Usage
 
 1.  Open the **Configuration** window for any Scene.
-2.  Click the **Rotate Scene** button (<i class="fas fa-sync-alt"></i>) located in the window header.
+2.  Click the **Rotate Scene** button located in the window header.
 3.  Choose **90° Clockwise** or **90° Counter-Clockwise**.
 4.  Wait for the notification confirming the rotation is complete.
 
