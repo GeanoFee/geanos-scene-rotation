@@ -1,0 +1,26 @@
+{
+  "id": "geanos-scene-rotation",
+  "title": "Geano's Scene Rotation",
+  "version": "1.0.0",
+  "compatibility": {
+    "minimum": "10",
+    "verified": "12"
+  },
+  "authors": [
+    {
+      "name": "GeanoFee"
+    }
+  ],
+  "esmodules": [
+    "scripts/main.js"
+  ],
+  "styles": [],
+  "languages": [
+    {
+      "lang": "en",
+      "name": "English",
+      "path": "languages/en.json"
+    }
+  ],
+  "description": "Allows GMs to rotate the entire scene (background, walls, lights, etc.) by 90 degrees."
+}
