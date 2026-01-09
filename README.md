@@ -4,7 +4,7 @@
 
 A FoundryVTT module that solves one of the most annoying issues in Foundry: rotating a scene 90 degrees after you've already set it up.
 
-## Features
+## ✨ Features
 
 *   **One-Click Rotation**: Adds a "Rotate Scene" button to the Scene Configuration header.
 *   **Complete Data Alignment**: Automatically rotates and realigns:
@@ -17,23 +17,18 @@ A FoundryVTT module that solves one of the most annoying issues in Foundry: rota
     *   **Smart Naming**: Uses `[OriginalName]_rotation[Degrees].jpg`.
     *   **Efficiency**: If a rotated version of the image already exists, it reuses it instantly instead of generating a new one.
 
-## Installation
+## 🚀 Installation
 
-1.  Place the `geanos-scene-rotation` folder into your `Data/modules/` directory.
-2.  Restart Foundry VTT.
-3.  Enable the module in **Manage Modules**.
+- **Manifest URL**: `https://github.com/GeanoFee/geanos-scene-rotation/releases/latest/download/module.json` within Foundry's "Install Module" window.
 
-Alternatively:
-Enter the Manifest URL `https://github.com/GeanoFee/geanos-scene-rotation/releases/latest/download/module.json` within Foundry's "Install Module" window.
-
-## Usage
+## 🎮 Usage
 
 1.  Open the **Configuration** window for any Scene.
 2.  Click the **Rotate Scene** button located in the window header.
 3.  Choose **90° Clockwise** or **90° Counter-Clockwise**.
 4.  Wait for the notification confirming the rotation is complete.
 
-## How it works
+## 🔧 How it works
 
 When you rotate a scene, the module:
 1.  Swaps the Scene Width and Height.
@@ -42,6 +37,6 @@ When you rotate a scene, the module:
     *   **If yes**: It assigns that image to the scene.
     *   **If no**: It loads the image into an off-screen canvas, rotates it, saves it as a high-quality JPEG, uploads it, and then assigns it.
 
-## Compatibility
+## 🔧 Compatibility
 
 Verified for Foundry VTT v12. Should work on v10+.
