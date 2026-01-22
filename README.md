@@ -40,3 +40,7 @@ When you rotate a scene, the module:
 ## 🔧 Compatibility
 
 Verified for Foundry VTT v12. Should work on v10+.
+
+---
+## License
+This module is licensed under the [MIT License](LICENSE).
