@@ -1,46 +1,63 @@
 Hooks.on("renderSceneConfig", (app, html, data) => {
-    const header = html.find(".window-header");
-    const title = header.find(".window-title");
+    const $html = $(html);
+    let header = $html.find(".window-header");
 
-    const rotateBtn = $(`<a class="control"><i class="fas fa-sync-alt"></i> ${game.i18n.localize("SCENEROTATION.RotateButton")}</a>`);
+    // ApplicationV2 Compatibility: If html is content, check app.element for the window header
+    if (header.length === 0 && app.element) {
+        header = $(app.element).find(".window-header");
+    }
 
+    if (header.length === 0) return; // Do not inject if no header found
+
+    // Look for Close Button
+    let closeBtn = header.find("[data-action='close']");
+    if (closeBtn.length === 0) closeBtn = header.find(".close");
+
+    // Prevent duplicate injection
+    if (header.find("#geanos-rotate-btn").length > 0) return;
+
+    // Create Rotate Button
+    const rotateBtn = $(`<a class="control window-control" id="geanos-rotate-btn" data-action="rotate" data-tooltip="${game.i18n.localize("SCENEROTATION.RotateButton")}"><i class="fas fa-sync-alt"></i> ${game.i18n.localize("SCENEROTATION.RotateButton")}</a>`);
+
+    if (closeBtn.length > 0) {
+        rotateBtn.insertBefore(closeBtn);
+    } else {
+        // Fallback: Prepend to header to ensure visibility
+        header.prepend(rotateBtn);
+    }
     rotateBtn.on("click", async (event) => {
         event.preventDefault();
-        await new RotateSceneDialog(app.document).render(true);
-    });
 
-    // Insert before the Close button
-    const closeBtn = header.find(".close");
-    rotateBtn.insertBefore(closeBtn);
-});
-
-class RotateSceneDialog extends Dialog {
-    constructor(scene) {
-        super({
-            title: game.i18n.localize("SCENEROTATION.DialogTitle"),
+        const degrees = await foundry.applications.api.DialogV2.wait({
+            window: { title: game.i18n.localize("SCENEROTATION.DialogTitle") },
             content: `<p>${game.i18n.localize("SCENEROTATION.DialogContent")}</p>`,
-            buttons: {
-                clockwise: {
+            buttons: [
+                {
+                    action: "clockwise",
                     label: game.i18n.localize("SCENEROTATION.Clockwise"),
-                    callback: () => this.rotate(scene, 90)
+                    default: true,
+                    callback: () => 90,
+                    icon: "fas fa-redo"
                 },
-                counterClockwise: {
+                {
+                    action: "counterClockwise",
                     label: game.i18n.localize("SCENEROTATION.CounterClockwise"),
-                    callback: () => this.rotate(scene, -90)
+                    callback: () => -90,
+                    icon: "fas fa-undo"
                 }
-            },
-            default: "clockwise"
+            ],
+            close: () => null
         });
-    }
 
-    async rotate(scene, degrees) {
-        ui.notifications.info(`Rotating scene ${scene.name} by ${degrees} degrees...`);
-        // Logic to be implemented
-        const rotator = new SceneRotator(scene);
-        await rotator.rotate(degrees);
-        ui.notifications.info("Rotation complete.");
-    }
-}
+        if (degrees) {
+            const scene = app.document;
+            ui.notifications.info(`Rotating scene ${scene.name} by ${degrees} degrees...`);
+            const rotator = new SceneRotator(scene);
+            await rotator.rotate(degrees);
+            ui.notifications.info("Rotation complete.");
+        }
+    });
+});
 
 class SceneRotator {
     constructor(scene) {
@@ -85,29 +102,63 @@ class SceneRotator {
             return { x: nx, y: ny };
         };
 
-        const updates = {};
+        const updates = {}; // Atomic Update Object
 
         // 1. Scene Updates
         updates.width = newWidth;
         updates.height = newHeight;
-        // Adjust grid offset if necessary? Usually grid aligns to top-left (0,0). 
-        // If there was a shift (legacy), it might need rotation, but modern Foundry uses background offset.
-        // scene.background.offsetX/Y -> transform?
-        if (this.scene.background && (this.scene.background.offsetX || this.scene.background.offsetY)) {
-            // Not strictly supported in V10+ Data Models the same way, check `background.offsetX`.
-            // Assuming default 0,0 for now.
+        // 1.5 Background Offset Rotation
+        const oldOffX = this.scene.background.offsetX || 0;
+        const oldOffY = this.scene.background.offsetY || 0;
+
+        // Calculate new offsets based on rotation
+        // 90 CW: Top-Left of new image corresponds to Bottom-Left of old image relative to (0,0)
+        // -90 CCW: Top-Left of new image corresponds to Top-Right of old image relative to (0,0)
+
+        let newOffX = oldOffX;
+        let newOffY = oldOffY;
+
+        if (degrees === 90 || degrees === -270) {
+            newOffX = -oldOffY;
+            newOffY = oldOffX;
+        } else if (degrees === -90 || degrees === 270) {
+            newOffX = oldOffY;
+            newOffY = -oldOffX;
+        } else if (Math.abs(degrees) === 180) {
+            newOffX = -oldOffX;
+            newOffY = -oldOffY;
         }
 
-        // 2. Embedded Documents
-        // Docs to rotate: Token, Tile, Wall, AmbientLight, AmbientSound, Note, Drawing, MeasuredTemplate
+        updates["background.offsetX"] = newOffX;
+        updates["background.offsetY"] = newOffY;
 
+        // 2. Embedded Documents
+        // Atomic Update: Gather updates for all embedded documents into the main update object.
+        // This prevents partial application where Tokens move but Scene doesn't rotate.
+
+        // Docs to rotate: Token, Tile, Wall, AmbientLight, AmbientSound, Note, Drawing, MeasuredTemplate
         const embeddedTypes = [
             "Token", "Tile", "Wall", "AmbientLight", "AmbientSound", "Note", "Drawing", "MeasuredTemplate"
         ];
 
+        // Map Type to Collection Name used in update (e.g. "Token" -> "tokens")
+        const typeToCollection = {
+            "Token": "tokens",
+            "Tile": "tiles",
+            "Wall": "walls",
+            "AmbientLight": "lights",
+            "AmbientSound": "sounds",
+            "Note": "notes",
+            "Drawing": "drawings",
+            "MeasuredTemplate": "templates"
+        };
+
         for (const type of embeddedTypes) {
             const collection = this.scene.getEmbeddedCollection(type);
             if (!collection.size) continue;
+
+            const collectionKey = typeToCollection[type];
+            if (!collectionKey) continue;
 
             const docUpdates = [];
             for (const doc of collection) {
@@ -129,23 +180,34 @@ class SceneRotator {
                     }
                 }
                 else if (type === "Token" || type === "Tile" || type === "Drawing") {
-                    // Start with center-based logic
-                    // These objects have width/height and rotate around their center.
-                    // 1. Find Center
-                    // Note: Token.width is in grid units. Token.x/y is top-left in pixels.
-                    // Tile.width is pixels.
+                    // Logic:
+                    // 1. Calculate Original Center in PIXELS
+                    // 2. Transform Center to New Coordinates
+                    // 3. Determine New Width/Height (Swap if 90/270 deg rotation)
+                    // 4. Calculate New Top-Left based on New Center and New Dimensions
 
-                    // We need PIXEL width/height for center calculation.
                     let pixelW = 0, pixelH = 0;
+                    let isToken = type === "Token";
+                    let isTile = type === "Tile";
+                    let isDrawing = type === "Drawing";
 
-                    if (type === "Token") {
-                        pixelW = (doc.width || 0) * this.scene.grid.size;
-                        pixelH = (doc.height || 0) * this.scene.grid.size;
-                    } else if (type === "Tile") {
+                    // Get Dimensions
+                    if (isToken) {
+                        // FIX: Use accurate pixel dimensions from the PlaceableObject (doc.object) if available.
+                        // This handles Hex grids where `width * size` !== pixel width.
+                        // Also handles other grid types/scaling correctly.
+                        if (doc.object && doc.object.w && doc.object.h) {
+                            pixelW = doc.object.w;
+                            pixelH = doc.object.h;
+                        } else {
+                            // Fallback (Square Grid assumption)
+                            pixelW = (doc.width || 0) * this.scene.grid.size;
+                            pixelH = (doc.height || 0) * this.scene.grid.size;
+                        }
+                    } else if (isTile) {
                         pixelW = doc.width || 0;
                         pixelH = doc.height || 0;
-                    } else if (type === "Drawing") {
-                        // Drawings store dimensions in the shape object
+                    } else if (isDrawing) {
                         pixelW = doc.shape.width || 0;
                         pixelH = doc.shape.height || 0;
                     }
@@ -161,27 +223,36 @@ class SceneRotator {
                     // New Center
                     const { x: ncx, y: ncy } = transform(cx, cy);
 
-                    // New Top-Left
-                    // Rotation simply adds to the existing rotation. 
-                    // The object itself rotates around its center.
-                    // So we just place the center at the new spot.
-                    // And update rotation.
+                    // Determine if we need to swap dimensions (90 or 270 degrees)
+                    const is90Step = Math.abs(degrees) % 180 !== 0;
 
-                    update.x = ncx - pixelW / 2;
-                    update.y = ncy - pixelH / 2;
+                    let newPixelW = pixelW;
+                    let newPixelH = pixelH;
+
+                    if (is90Step) {
+                        // Swap dimensions for the calculation of Top-Left
+                        newPixelW = pixelH;
+                        newPixelH = pixelW;
+
+                        // For non-square objects, we should also update the document's width/height properties?
+                        if (isToken) {
+                            update.width = doc.height;
+                            update.height = doc.width;
+                        } else if (isTile) {
+                            update.width = doc.height;
+                            update.height = doc.width;
+                        } else if (isDrawing) {
+                            update["shape.width"] = doc.shape.height;
+                            update["shape.height"] = doc.shape.width;
+                        }
+                    }
+
+                    // Calculate New Top-Left
+                    // We use the NEW dimensions to center it on the NEW center point.
+                    update.x = ncx - newPixelW / 2;
+                    update.y = ncy - newPixelH / 2;
 
                     update.rotation = ((doc.rotation || 0) + degrees) % 360;
-
-                    // For Drawings, they might have specific logic for text/polygons, but x/y/rotation helps.
-                    // Be careful with freehand drawings (points array).
-                    if (type === "Drawing" && doc.shape.type === "p") { // Polygon/Freehand
-                        // We need to rotate the points relative to the drawing origin (0,0 local)?
-                        // Drawing points are relative to x,y.
-                        // Rotating the drawing object handles visual rotation, but hitboxes?
-                        // Foundry Drawings apply rotation to the container. So points should strictly remain "relative" 
-                        // unless we want to "bake" the rotation.
-                        // Changing `rotation` is safer.
-                    }
                 }
                 else if (type === "MeasuredTemplate") {
                     const { x, y } = transform(doc.x, doc.y);
@@ -194,30 +265,22 @@ class SceneRotator {
             }
 
             if (docUpdates.length > 0) {
-                await this.scene.updateEmbeddedDocuments(type, docUpdates);
+                updates[collectionKey] = docUpdates;
             }
         }
 
-        // Update Scene Dimensions
-
         // 3. Image Rotation (Background & Foreground)
-        // We do this BEFORE the final update, so we can include the new paths in the scene update.
         try {
             const imageRotator = new ImageRotator();
 
             if (this.scene.background.src) {
                 ui.notifications.info("Rotating background image...");
-                // Backgrounds as JPG to avoid issues/size
                 const newBg = await imageRotator.rotateAndUpload(this.scene.background.src, degrees, "image/jpeg");
                 if (newBg) updates["background.src"] = newBg;
             }
 
-            // Handle legacy 'img' if present or just ensure we cover bases? 
-            // V10+ uses background.src.
-
             if (this.scene.foreground) {
                 ui.notifications.info("Rotating foreground image...");
-                // Foregrounds as PNG to preserve transparency
                 const newFg = await imageRotator.rotateAndUpload(this.scene.foreground, degrees, "image/png");
                 if (newFg) updates.foreground = newFg;
             }
@@ -226,6 +289,37 @@ class SceneRotator {
             ui.notifications.warn(`Image rotation failed: ${err.message}. Scene will rotate but background image might look wrong.`);
         }
 
+        // 4. Hex Grid Rotation (Swap Rows <-> Columns)
+        const gridType = this.scene.grid.type;
+        if (gridType >= 2 && gridType <= 5 && isSwap) {
+            let newType = gridType;
+            if (gridType === 2) newType = 4;      // RowsOdd -> ColsOdd
+            else if (gridType === 3) newType = 5; // RowsEven -> ColsEven
+            else if (gridType === 4) newType = 2; // ColsOdd -> RowsOdd
+            else if (gridType === 5) newType = 3; // ColsEven -> RowsEven
+
+            updates["grid.type"] = newType;
+            ui.notifications.info("Swapping Hex Grid orientation to match rotation.");
+        }
+
+        // 5. Fog of War Reset
+        if (this.scene.fog.exploration) {
+            ui.notifications.info("Resetting Fog of War to ensure alignment.");
+            try {
+                if (typeof this.scene.resetFog === "function") {
+                    await this.scene.resetFog();
+                } else if (this.scene.isView && canvas.fog) {
+                    await canvas.fog.reset();
+                } else {
+                    console.warn("Geano's Rotation: Could not find a method to reset Fog of War for this scene.");
+                }
+                await new Promise(r => setTimeout(r, 100)); // Wait for reset
+            } catch (err) {
+                console.warn("Geano's Rotation: Failed to reset Fog of War.", err);
+            }
+        }
+
+        // Final Atomic Update
         await this.scene.update(updates);
     }
 }
@@ -245,93 +339,41 @@ class ImageRotator {
         // --- 1. Determine Paths and Names ---
         const pathParts = path.split("/");
         const filename = pathParts.pop();
-        // Decode URI component just in case, though FilePicker usually handles it.
-        // But for regex matching, better be safe.
         const decodedFilename = decodeURIComponent(filename);
-
-        // Remove 'path' from parts to get directory
-        // If path was "my/maps/temple.jpg", pathParts is now ["my", "maps"]
-        // If path was "temple.jpg", pathParts is []
-        // We need to re-assemble the directory string later.
-
         let parentDir = pathParts.join("/");
-        // If the current file is ALREADY in a 'rotated-images' folder, we should go up one level for the "Base" directory?
-        // User: "create the 'rotated images' folder within the folder the original image is placed in"
-        // If we are rotating "rotated-images/temple_rotation90.jpg", the 'original' was in the parent of 'rotated-images'.
-        // So we should stick to 'rotated-images' being a sibling of the original.
 
         let baseName = decodedFilename.substring(0, decodedFilename.lastIndexOf(".")) || decodedFilename;
         let currentRotation = 0;
 
         // Regex to check for existing rotation
-        // Matches: temple_rotation90.jpg -> base: temple, rot: 90
         const rotationMatch = baseName.match(/^(.*)_rotation(-?\d+)$/);
 
         if (rotationMatch) {
             baseName = rotationMatch[1];
             currentRotation = parseInt(rotationMatch[2], 10);
-
-            // If we are currently in 'rotated-images', step out for the 'parentDir' reference if needed?
-            // Actually, we just need to ensure we target `parentDir/rotated-images`.
-            // If `parentDir` already ends in `rotated-images`, we stay there?
-            // Let's check: "modules/maps/rotated-images"
-            // If we want to keep all rotated versions in the same folder, this works.
-            // But if we want to follow the rule strictly: "folder original is placed in".
-            // Original: "modules/maps/temple.jpg".
-            // 90deg: "modules/maps/rotated-images/temple_rotation90.jpg".
-            // When rotating that one: parentDir is "modules/maps/rotated-images".
-            // Creating "modules/maps/rotated-images/rotated-images" is BAD.
-
             if (parentDir.endsWith("/rotated-images") || parentDir.endsWith("rotated-images")) {
-                // We are already inside. Target is THIS directory.
-                // parentDir remains as is.
+                // Do nothing
             } else {
-                // We are at root. Target is parentDir + /rotated-images
                 parentDir = parentDir ? `${parentDir}/rotated-images` : "rotated-images";
             }
         } else {
-            // New rotation from raw file.
-            // Target is parentDir + /rotated-images
             parentDir = parentDir ? `${parentDir}/rotated-images` : "rotated-images";
         }
 
         // Calculate new rotation
-        // Normalize to positive 0-360
         let newRotation = (currentRotation + degrees) % 360;
-        if (newRotation < 0) newRotation += 360; // handle negatives
+        if (newRotation < 0) newRotation += 360;
 
         const newFileName = `${baseName}_rotation${newRotation}.${ext}`;
-        // Note: We deliberately DO NOT check for existence of a file with a DIFFERENT extension.
-        // If user rotates a PNG background to JPG, we check for .jpg validity.
-        // Re-encode if necessary? FilePicker usually takes standard strings. 
-        // If `baseName` had spaces, they might be decoded now. Best to keep them as is for file system generally, 
-        // but Foundry URLs are encoded. 
-        // Let's rely on string interpolation.
-
-        // Note: Check source. If path started with "http", we assume S3 or similar but we default to 'data' source for browse/upload usually?
-        // Or we assume the user is using User Data.
-        // We will try to use the inferred parentDir.
-
-        const targetPath = `${parentDir}/${newFileName}`;
 
         // --- 2. Check Existence ---
         try {
-            // We use FilePicker.browse to check if the file exists in the directory.
-            // We need to browse 'parentDir'.
-            // Note: FilePicker.browse(source, target)
-            // We'll guess source 'data'. If it fails, we might just proceed to generate.
-
-            const result = await FilePicker.browse("data", parentDir).catch(() => null);
+            const result = await foundry.applications.apps.FilePicker.browse("data", parentDir).catch(() => null);
 
             if (result) {
-                // Check files list
-                // files are full URL/paths. We need to check if one ends with our newFilename.
-                // We shouldn't match exact path string because of host/s3 prefix differences.
                 const exists = result.files.find(f => decodeURIComponent(f).endsWith(newFileName));
-
                 if (exists) {
-                    console.log(`Geano's Rotation: File ${newFileName} already exists. Skipping render.`);
-                    return exists; // Return the full path found by Foundry
+                    return exists;
                 }
             }
         } catch (e) {
@@ -339,18 +381,8 @@ class ImageRotator {
         }
 
         // --- 3. Render and Upload ---
-
-        // Load the *current* image (path)
         const img = await this._loadImage(path);
 
-        // Calculate dimensions (Current Image Dimensions -> Swapped?)
-        // If we load the current image, we just rotate it by the DELTA (degrees).
-        // e.g. Loaded 90deg image. Rotating +90.
-        // Image is 100x200.
-        // Canvas should be 200x100.
-        // Rotate 90.
-
-        // NOTE: degrees is the step (e.g. 90).
         const isSwap = Math.abs(degrees) % 180 !== 0;
         const width = isSwap ? img.height : img.width;
         const height = isSwap ? img.width : img.height;
@@ -360,21 +392,18 @@ class ImageRotator {
         canvas.height = height;
         const ctx = canvas.getContext("2d");
 
-        // Translate center
         ctx.translate(width / 2, height / 2);
         ctx.rotate(degrees * Math.PI / 180);
         ctx.drawImage(img, -img.width / 2, -img.height / 2);
 
         const exportBlob = await new Promise(resolve => canvas.toBlob(resolve, mimeType, 0.9));
 
-        // Create Folder if needed?
-        // browse() failure might mean folder missing.
         try {
-            await FilePicker.createDirectory("data", parentDir).catch(() => { });
+            await foundry.applications.apps.FilePicker.createDirectory("data", parentDir).catch(() => { });
         } catch (e) { }
 
         const file = new File([exportBlob], newFileName, { type: mimeType });
-        const uploadResult = await FilePicker.upload("data", parentDir, file);
+        const uploadResult = await foundry.applications.apps.FilePicker.upload("data", parentDir, file);
 
         return uploadResult.path;
     }
